@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Field, ValidationError } from '@directus/types';
-import { ref, watch } from 'vue';
+import { ref, watch, onBeforeUnmount } from 'vue';
+import { useRouter } from 'vue-router';
 import { isEqual } from 'lodash-es';
 import TabGroup from './tab-group.vue';
 import TabPanel from './tab-panel.vue';
@@ -31,8 +32,18 @@ defineEmits<{
 	(e: 'apply', value: Record<string, unknown>): void;
 }>();
 
-const activeIndex = ref(0);
+const router = useRouter();
+
+let hashFns = [];
+
+const tabGroup = props.field.meta.field;
+
+const activeIndex = ref(tabIndex(window.location.hash));
 const { groupFields, groupValues } = useComputedGroup();
+
+onBeforeUnmount((callback, target) => {
+	replaceHash(() => tabRemovedHash(window.location.hash));
+});
 
 watch(
 	() => props.validationErrors,
@@ -47,6 +58,30 @@ watch(
 		if (includedFieldsWithErrors !== -1) activeIndex.value = includedFieldsWithErrors;
 	}
 );
+
+watch(
+	() => activeIndex.value,
+	(newVal, oldVal) => {
+		replaceHash(() => tabHash(window.location.hash, newVal));
+	},
+	{ immediate: true },
+);
+
+function replaceHash(hashFn) {
+	if (hashFns.length === 0) {
+		setTimeout(() => {
+			let hash;
+			while (hashFns.length > 0) {
+				const fn = hashFns.shift();
+				hash = fn();
+			}
+			if (hash) {
+				router.replace(hash);
+			}
+		}, 0);
+	}
+	hashFns.push(hashFn);
+}
 
 function useComputedGroup() {
 	const groupFields = ref<Field[]>(limitFields());
@@ -77,6 +112,47 @@ function useComputedGroup() {
 	function limitFields(): Field[] {
 		return props.fields.filter((field) => field.meta?.group === props.field.meta?.field);
 	}
+}
+
+function tabIndex(hash) {
+	const strings = hash.replaceAll(/^#/g, '').split('#');
+	for (let i = 0; i < strings.length; i++) {
+		let [ group, tab ] = strings[i].split('/');
+		if (group === tabGroup) {
+			return + tab;
+		}
+	}
+	return 0;
+}
+function tabHash(hash, tab) {
+	const marker = '#' + tabGroup + '/';
+	if (hash.includes(marker)) {
+		let index = hash.indexOf(marker) + marker.length;
+		let endIndex = hash.indexOf('#', index + marker.length);
+		if (endIndex === -1) {
+			return hash.substring(0, index) + tab;
+		} else {
+			return hash.substring(0, index) + tab + hash.substring(endIndex);
+		}
+	}
+	if (hash === '') {
+		return '#' + tabGroup + '/' + tab;
+	} else {
+		return hash + '#' + tabGroup + '/' + tab;
+	}
+}
+function tabRemovedHash(hash) {
+	const marker = '#' + tabGroup + '/';
+	if (hash.includes(marker)) {
+		let index = hash.indexOf(marker);
+		let endIndex = hash.indexOf('#', index + marker.length);
+		if (endIndex === -1) {
+			return hash.substring(0, index);
+		} else {
+			return hash.substring(0, index) + hash.substring(endIndex);
+		}
+	}
+	return hash
 }
 </script>
 
